@@ -835,7 +835,16 @@ static inline void update_mmu_cache(struct vm_area_struct *vma,
 #define kc_offset_to_vaddr(o)	((o) | VA_START)
 
 #ifdef CONFIG_ARM64_PA_BITS_52
+/*
+    Symbol: ARM64_PA_BITS_52 [=n]
+ */
 #define phys_to_ttbr(addr)	(((addr) | ((addr) >> 46)) & TTBR_BADDR_MASK_52)
+/*
+    #define TTBR_BADDR_MASK_52	(((UL(1) << 46) - 1) << 2)
+        (((UL(1) << 46) - 1) << 2)  = (0x0000400000000000 - 1) << 2
+                                    = 0x00003FFFFFFFFFFF << 2
+                                    = 0xFFFFFFFFFFFC
+ */
 #else
 #define phys_to_ttbr(addr)	(addr)
 #endif

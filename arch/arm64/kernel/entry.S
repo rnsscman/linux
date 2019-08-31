@@ -71,11 +71,27 @@
 	.macro kernel_ventry, el, label, regsize = 64
 	.align 7
 #ifdef CONFIG_UNMAP_KERNEL_AT_EL0
+/*
+    Symbol: UNMAP_KERNEL_AT_EL0 [=y]
+    Prompt: Unmap kernel when running in userspace (aka "KAISER")
+    Defined at arch/arm64/Kconfig:1013
+ */
+
 alternative_if ARM64_UNMAP_KERNEL_AT_EL0
+/*
+    #define ARM64_UNMAP_KERNEL_AT_EL0		23
+ */
 	.if	\el == 0
 	.if	\regsize == 64
 	mrs	x30, tpidrro_el0
+/*
+ARM DDI 0487E.a - D13-3369
+ */
+
 	msr	tpidrro_el0, xzr
+/*
+
+ */
 	.else
 	mov	x30, xzr
 	.endif
@@ -85,6 +101,11 @@ alternative_else_nop_endif
 
 	sub	sp, sp, #S_FRAME_SIZE
 #ifdef CONFIG_VMAP_STACK
+/*
+    Symbol: VMAP_STACK [=y]
+    Prompt: Use a virtually-mapped stack
+    Defined at arch/Kconfig:810
+ */
 	/*
 	 * Test whether the SP has overflowed, without corrupting a GPR.
 	 * Task and IRQ stacks are aligned to (1 << THREAD_SHIFT).
@@ -178,7 +199,30 @@ alternative_cb_end
 	clear_gp_regs
 	mrs	x21, sp_el0
 	ldr_this_cpu	tsk, __entry_task, x20	// Ensure MDSCR_EL1.SS is clear,
+/*
+    DEFINE_PER_CPU(struct task_struct *, __entry_task);
+
+        #define DEFINE_PER_CPU(type, name)					\
+	        DEFINE_PER_CPU_SECTION(type, name, "")
+
+            #define DEFINE_PER_CPU_SECTION(type, name, sec)				\
+            	__PCPU_ATTRS(sec) __typeof__(type) name
+
+                #define __PCPU_ATTRS(sec)						\
+                	__percpu __attribute__((section(PER_CPU_BASE_SECTION sec)))	\
+                	PER_CPU_ATTRIBUTES
+
+    ARM DDI 0487E.a - D13-3497
+        MDSCR_EL1, Monitor Debug System Control Register
+            Field descriptions
+                SS, bit [0]
+                    Software step control bit. If EL D is using AArch64, enable Software step. Permitted values are:
+                        0b0 Software step disabled
+ */
 	ldr	x19, [tsk, #TSK_TI_FLAGS]	// since we can unmask debug
+/*
+    x19 = tsk + TSK_TI_FLAGS
+ */
 	disable_step_tsk x19, x20		// exceptions when scheduling.
 
 	apply_ssbd 1, x22, x23

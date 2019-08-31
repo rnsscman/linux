@@ -80,6 +80,12 @@
 
 	.macro	disable_step_tsk, flgs, tmp
 	tbz	\flgs, #TIF_SINGLESTEP, 9990f
+/*
+    tst     flgs #TIF_SINGLESTEP
+    b.eq    9990f
+    #define TIF_SINGLESTEP		21
+ */
+
 	mrs	\tmp, mdscr_el1
 	bic	\tmp, \tmp, #DBG_MDSCR_SS
 	msr	mdscr_el1, \tmp
@@ -274,8 +280,18 @@ alternative_endif
 	adr_l	\dst, \sym
 alternative_if_not ARM64_HAS_VIRT_HOST_EXTN
 	mrs	\tmp, tpidr_el1
+/*
+    tmp = tpidr_el1
+    ARM DDI 0487E.a - D13-3363
+        TPIDR_EL1, EL1 Software Thread ID Register
+ */
 alternative_else
 	mrs	\tmp, tpidr_el2
+/*
+    tmp = tpidr_el2
+    ARM DDI 0487E.a - D13-3365
+        TPIDR_EL2, EL2 Software Thread ID Register
+ */
 alternative_endif
 	ldr	\dst, [\dst, \tmp]
 	.endm
@@ -543,7 +559,37 @@ USER(\label, ic	ivau, \tmp2)			// invalidate I line PoU
  */
 	.macro	offset_ttbr1, ttbr
 #ifdef CONFIG_ARM64_USER_VA_BITS_52
+/*
+  │ Symbol: ARM64_USER_VA_BITS_52 [=n]
+  │ Type  : bool
+  │ Prompt: 52-bit (user)
+  │   Location:
+  │     -> Kernel Features
+  │ (1)   -> Virtual address space size (<choice> [=y])
+  │   Defined at arch/arm64/Kconfig:724
+  │   Depends on: <choice> && ARM64_64K_PAGES [=n] && (ARM64_PAN [=y] || !ARM64_SW_TTBR0_PAN [=n])
+ */
+
 	orr	\ttbr, \ttbr, #TTBR1_BADDR_4852_OFFSET
+/*
+    #define TTBR1_BADDR_4852_OFFSET	(((UL(1) << (52 - PGDIR_SHIFT)) - \
+            (UL(1) << (48 - PGDIR_SHIFT))) * 8)
+
+        #define PGDIR_SHIFT		ARM64_HW_PGTABLE_LEVEL_SHIFT(4 - CONFIG_PGTABLE_LEVELS)
+            #define ARM64_HW_PGTABLE_LEVEL_SHIFT(n)	((PAGE_SHIFT - 3) * (4 - (n)) + 3)
+                #define PAGE_SHIFT	12
+
+            │ Symbol: PGTABLE_LEVELS [=4]
+            │ Type  : integer
+            │   Defined at arch/arm64/Kconfig:278
+
+        -> ((12 - 3) * (4 - (0)) + 3) = (9 * 4 + 3) = 39
+
+    -> (((1 << (52 - 39)) - (1 << (48 - 39))) * 8 = ((1 << 13) - (1 << 9)) * 8
+    = (0x2000 - 0x200) * 8 = 0x1E00 * 8 = 0xF000
+
+    ttbr = ttbr | 0xF000
+ */
 #endif
 	.endm
 
@@ -567,10 +613,29 @@ USER(\label, ic	ivau, \tmp2)			// invalidate I line PoU
  */
 	.macro	phys_to_ttbr, ttbr, phys
 #ifdef CONFIG_ARM64_PA_BITS_52
+/*
+    Symbol: ARM64_PA_BITS_52 [=n] 
+ */
 	orr	\ttbr, \phys, \phys, lsr #46
+/*
+    ttbr = phys | (phys >> 46)
+ */
+
 	and	\ttbr, \ttbr, #TTBR_BADDR_MASK_52
+/*
+    ttbr = ttbr & TTBR_BADDR_MASK_52 = ttbr & 0x0000FFFFFFFFFFFC
+    #define TTBR_BADDR_MASK_52	(((UL(1) << 46) - 1) << 2)
+        (((UL(1) << 46) - 1) << 2)  = (0x0000400000000000 - 1) << 2
+                                    = 0x00003FFFFFFFFFFF << 2
+                                    = 0xFFFFFFFFFFFC
+ */
+
 #else
 	mov	\ttbr, \phys
+/*
+    ttbr = phys
+ */
+
 #endif
 	.endm
 

@@ -422,48 +422,153 @@ ENDPROC(__create_page_tables)
  */
 __primary_switched:
 	adrp	x4, init_thread_union
+/*
+    x4 = init_thread_union의 주소
+ */
+
 	add	sp, x4, #THREAD_SIZE
+/*
+    sp = x4 + THREAD_SIZE
+    #define THREAD_SIZE		(UL(1) << THREAD_SHIFT)
+ */
+
 	adr_l	x5, init_task
+/*
+    x5 = init_task의 주소
+ */
+
 	msr	sp_el0, x5			// Save thread_info
+/*
+    sp_el0 = x5
+    ARM DDI 0487E.a - C5-404
+        SP_EL0, Stack Pointer (EL0)
+ */
 
 	adr_l	x8, vectors			// load VBAR_EL1 with virtual
 	msr	vbar_el1, x8			// vector table address
+/*
+    vbar_el1 = x8
+    ARM DDI 0487E.a - D13-3394
+        VBAR_EL1, Vector Base Address Register (EL1)
+ */
+
 	isb
 
 	stp	xzr, x30, [sp, #-16]!
 	mov	x29, sp
+/*
+    x29 = sp
+ */
 
 	str_l	x21, __fdt_pointer, x5		// Save FDT pointer
+/*
+    __fdt_pointer = x21
+ */
 
 	ldr_l	x4, kimage_vaddr		// Save the offset between
+/*
+    x4 = kimage_vaddr의 주소
+ */
+
 	sub	x4, x4, x0			// the kernel virtual and
+/*
+    x4 = x4 - x0
+ */
+
 	str_l	x4, kimage_voffset, x5		// physical mappings
+/*
+    kimage_voffset = x4
+ */
 
 	// Clear BSS
 	adr_l	x0, __bss_start
+/*
+    x0 = __bss_start의 주소
+ */
+
 	mov	x1, xzr
+/*
+    x1 = 0
+ */
+
 	adr_l	x2, __bss_stop
+/*
+    x2 = __bss_stop의 주소
+ */
+
 	sub	x2, x2, x0
+/*
+    x2 = x2 - x0
+ */
+
 	bl	__pi_memset
 	dsb	ishst				// Make zero page visible to PTW
+/*
+    ARM DDI 0487E.a - B2-129
+    ARM DDI 0487E.a - C6-891
+ */
 
 #ifdef CONFIG_KASAN
+/*
+    Symbol: KASAN [=n]
+    Prompt: KASAN: runtime memory debugger
+    Defined at lib/Kconfig.kasan:14
+ */
 	bl	kasan_early_init
 #endif
 #ifdef CONFIG_RANDOMIZE_BASE
 	tst	x23, ~(MIN_KIMG_ALIGN - 1)	// already running randomized?
+/*
+    xzr = x23 & ~(0x00200000 - 1) = x23 & ~(0x001FFFFF) = x23 & 0xFFE00000
+    #define MIN_KIMG_ALIGN		SZ_2M
+        #define SZ_2M				0x00200000
+ */
 	b.ne	0f
 	mov	x0, x21				// pass FDT address in x0
+/*
+    x0 = x21
+ */
+
 	bl	kaslr_early_init		// parse FDT for KASLR options
 	cbz	x0, 0f				// KASLR disabled? just proceed
+/*
+    cmp     x0 xzr
+    b.eq    0f
+    ARM DDI 0487E.a - C6-832
+        Compare and Branch on Zero compares the value in a register with zero, and conditionally branches to a label at a PC-relative offset if the comparison is equal.
+        It provides a hint that this is not a subroutine call or return. This instruction does not affect condition flags.
+ */
+
 	orr	x23, x23, x0			// record KASLR offset
+/*
+    x23 = x23 | x0
+ */
+
 	ldp	x29, x30, [sp], #16		// we must enable KASLR, return
+/*
+    x29 = sp
+    x30 = sp + 8
+    sp = sp + 16
+ */
+
 	ret					// to __primary_switch()
 0:
 #endif
 	add	sp, sp, #16
+/*
+    sp = sp + 16
+ */
+
 	mov	x29, #0
+/*
+    x29 = 0
+ */
+
 	mov	x30, #0
+/*
+    x30 = 0
+ */
+
 	b	start_kernel
 ENDPROC(__primary_switched)
 
@@ -775,18 +880,99 @@ ENDPROC(__secondary_switched)
  */
 ENTRY(__enable_mmu)
 	mrs	x2, ID_AA64MMFR0_EL1
+/*
+    x2 = ID_AA64MMFR0_EL1
+	ARM DDI 0487E.a - D13-3106
+		ID_AA64MMFR0_EL1, AArch64 Memory Model Feature Register 0
+			Purpose
+				Provides information about the implemented memory model and memory management support in AArch64 state.
+			Field descriptions
+				TGran4, bits [31:28]
+					Support for 4KB memory translation granule size. Defined values are:
+						0b0000 4KB granule supported.
+						0b1111 4KB granule not supported.
+ */
+
 	ubfx	x2, x2, #ID_AA64MMFR0_TGRAN_SHIFT, 4
+/*
+    #define ID_AA64MMFR0_TGRAN_SHIFT	ID_AA64MMFR0_TGRAN4_SHIFT
+        #define ID_AA64MMFR0_TGRAN4_SHIFT	28
+
+    x2 = (x2 >> 28) & 0xF
+ */
+
 	cmp	x2, #ID_AA64MMFR0_TGRAN_SUPPORTED
-	b.ne	__no_granule_support
+/*
+	#define ID_AA64MMFR0_TGRAN_SUPPORTED	ID_AA64MMFR0_TGRAN4_SUPPORTED
+		#define ID_AA64MMFR0_TGRAN4_SUPPORTED	0x0
+
+	subs xzr, x2, 0
+		xzr = x2 - 0
+					N	Z	C	V
+		if x2 > 0       0
+		if x2 = 0       1
+		if x2 < 0       0
+ */
+    b.ne	__no_granule_support
+/*
+	ARM DDI 0487E.a - C1-173
+        Condition code
+            Mnemonic    Meaning (integer)   Meaning (floating-point)    Condition flags
+            NE          Not equal           Not equal or unordered      Z == 0
+ */
+
 	update_early_cpu_boot_status 0, x2, x3
 	adrp	x2, idmap_pg_dir
+/*
+    x2 = idmap_pg_dir의 주소
+ */
+
 	phys_to_ttbr x1, x1
+/*
+    #define phys_to_ttbr(addr)	(addr)
+ */
+
 	phys_to_ttbr x2, x2
 	msr	ttbr0_el1, x2			// load TTBR0
+/*
+    ttbr0_el1 = x2
+	ARM DDI 0487E.a - D13-3371
+		TTBR0_EL1, Translation Table Base Register 0 (EL1)
+			Purpose
+				Holds the base address of the translation table for the initial
+				lookup for stage 1 of the translation of an address from the
+				lower VA range in the EL1&0 translation regime,
+				and other information for this translation regime.
+ */
+
 	offset_ttbr1 x1
+/*
+    x1 = x1 | 0xF000 (x1: TTBR1_EL1 value)
+ */
+
 	msr	ttbr1_el1, x1			// load TTBR1
+/*
+    ttbr1_el1 = x1
+	ARM DDI 0487E.a - D13-3384
+		TTBR1_EL1, Translation Table Base Register 1 (EL1)
+			Purpose
+				Holds the base address of the translation table for the initial
+				lookup for stage 1 of the translation of an address from the
+				higher VA range in the EL1&0 stage 1 translation regime,
+				and other information for this translation regime.
+ */
+
 	isb
 	msr	sctlr_el1, x0
+/*
+    sctlr_el1 = x0
+	ARM DDI 0487E.a - D13-3258
+		SCTLR_EL1, System Control Register (EL1)
+			Purpose
+				Provides top level control of the system,
+                including its memory system, at EL1 and EL0.
+ */
+
 	isb
 	/*
 	 * Invalidate the local I-cache so that any instructions fetched
@@ -836,21 +1022,65 @@ __relocate_kernel:
 	 * relocations in place.
 	 */
 	ldr	w9, =__rela_offset		// offset to reloc table
+/*
+    __rela_offset	= ABSOLUTE(ADDR(.rela.dyn) - KIMAGE_VADDR);
+ */
 	ldr	w10, =__rela_size		// size of reloc table
+/*
+    __rela_size	= SIZEOF(.rela.dyn);
+ */
 
 	mov_q	x11, KIMAGE_VADDR		// default virtual offset
+/*
+    x11 = KIMAGE_VADDR
+ */
+
 	add	x11, x11, x23			// actual virtual offset
+/*
+    x11 = x11 + x23
+ */
+
 	add	x9, x9, x11			// __va(.rela)
+/*
+    x9 = x9 + x11
+ */
+
 	add	x10, x9, x10			// __va(.rela) + sizeof(.rela)
+/*
+    x10 = x9 + x10
+ */
 
 0:	cmp	x9, x10
 	b.hs	1f
 	ldp	x11, x12, [x9], #24
+/*
+    x11 = x9
+    x12 = x9 + 8
+    x9 = x9 + 24
+ */
+
 	ldr	x13, [x9, #-8]
+/*
+    x13 = x9 - 8
+ */
+
 	cmp	w12, #R_AARCH64_RELATIVE
+/*
+    w12 = ?
+    #define R_AARCH64_RELATIVE		1027
+ */
+
 	b.ne	0b
 	add	x13, x13, x23			// relocate
+/*
+    x13 = x13 + x23
+ */
+
 	str	x13, [x11, x23]
+/*
+    x11 + x23 = x13 
+ */
+
 	b	0b
 1:	ret
 ENDPROC(__relocate_kernel)
@@ -858,18 +1088,76 @@ ENDPROC(__relocate_kernel)
 
 __primary_switch:
 #ifdef CONFIG_RANDOMIZE_BASE
+/*
+    │ Symbol: RANDOMIZE_BASE [=n]
+    │ Type  : bool
+    │ Prompt: Randomize the address of the kernel image
+    │   Location:
+    │ (1) -> Kernel Features
+    │   Defined at arch/arm64/Kconfig:1373
+    │   Selects: ARM64_MODULE_PLTS [=y] && RELOCATABLE [=n]
+ */
+
 	mov	x19, x0				// preserve new SCTLR_EL1 value
+/*
+    x19 = x0 (x0 = ?)
+ */
+
 	mrs	x20, sctlr_el1			// preserve old SCTLR_EL1 value
+/*
+    x20 = sctlr_el1
+    ARM DDI 0487E.a - D13-3258
+		SCTLR_EL1, System Control Register (EL1)
+			Purpose
+				Provides top level control of the system,
+                including its memory system, at EL1 and EL0.
+ */
+
 #endif
 
 	adrp	x1, init_pg_dir
+/*
+    x1 = init_pg_dir의 주소
+ */
+
 	bl	__enable_mmu
 #ifdef CONFIG_RELOCATABLE
+/*
+    │ Symbol: RELOCATABLE [=n]
+    │ Type  : bool
+    │   Defined at arch/arm64/Kconfig:1362
+    │   Selected by [n]:
+    │   - RANDOMIZE_BASE [=n]
+ */
+
 	bl	__relocate_kernel
+
 #ifdef CONFIG_RANDOMIZE_BASE
+/*
+    │ Symbol: RANDOMIZE_BASE [=n]
+    │ Type  : bool
+    │ Prompt: Randomize the address of the kernel image
+    │   Location:
+    │ (1) -> Kernel Features
+    │   Defined at arch/arm64/Kconfig:1373
+    │   Selects: ARM64_MODULE_PLTS [=y] && RELOCATABLE [=n]
+ */
+
 	ldr	x8, =__primary_switched
+/*
+    x8 = __primary_switched의 주소
+ */
+
 	adrp	x0, __PHYS_OFFSET
+/*
+    x0 = __PHYS_OFFSET의 주소
+ */
+
 	blr	x8
+/*
+    b x8 (x8 = __primary_switched의 주소)
+    x30 = PC + 4
+ */
 
 	/*
 	 * If we return here, we have a KASLR displacement in x23 which we need
@@ -878,13 +1166,31 @@ __primary_switch:
 	 */
 	pre_disable_mmu_workaround
 	msr	sctlr_el1, x20			// disable the MMU
+/*
+    sctlr_el1 = x20
+    ARM DDI 0487E.a - D13-3258
+        SCTLR_EL1, System Control Register (EL1)
+            Purpose
+                Provides top level control of the system,
+                including its memory system, at EL1 and EL0.
+ */
+
 	isb
 	bl	__create_page_tables		// recreate kernel mapping
 
 	tlbi	vmalle1				// Remove any stale TLB entries
+/*
+    ARM DDI 0487E.a - C5-727
+        TLBI VMALLE1, TLB Invalidate by VMID, All at stage 1, EL1
+ */
+
 	dsb	nsh
 
 	msr	sctlr_el1, x19			// re-enable the MMU
+/*
+    sctlr_el1 = x19
+ */
+
 	isb
 	ic	iallu				// flush instructions fetched
 	dsb	nsh				// via old mapping
