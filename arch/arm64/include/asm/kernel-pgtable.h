@@ -101,6 +101,15 @@
 #define IDMAP_DIR_SIZE		(IDMAP_PGTABLE_LEVELS * PAGE_SIZE)
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
+/*
+    │ Symbol: ARM64_SW_TTBR0_PAN [=n]
+    │ Type  : bool
+    │ Prompt: Emulate Privileged Access Never using TTBR0_EL1 switching
+    │   Location:
+    │ (1) -> Kernel Features
+    │   Defined at arch/arm64/Kconfig:1149
+ */
+
 #define RESERVED_TTBR0_SIZE	(PAGE_SIZE)
 #else
 #define RESERVED_TTBR0_SIZE	(0)

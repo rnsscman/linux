@@ -49,6 +49,15 @@
 
 	.macro ct_user_enter
 #ifdef CONFIG_CONTEXT_TRACKING
+/*
+    │ Symbol: CONTEXT_TRACKING [=n]
+    │ Type  : bool
+    │   Defined at kernel/time/Kconfig:120
+    │   Depends on: GENERIC_CLOCKEVENTS [=y]
+    │   Selected by [n]:
+    │   - VIRT_CPU_ACCOUNTING_GEN [=n] && <choice> && HAVE_CONTEXT_TRACKING [=y] && HAVE_VIRT_CPU_ACCOUNTING_GEN [=y] && GENERIC_CLOCKEVENTS [=y]
+ */
+
 	bl	context_tracking_user_enter
 #endif
 	.endm
@@ -131,22 +140,95 @@ alternative_else_nop_endif
 
 	.macro tramp_alias, dst, sym
 	mov_q	\dst, TRAMP_VALIAS
+/*
+    dst = TRAMP_VALIAS
+    #define TRAMP_VALIAS		(__fix_to_virt(FIX_ENTRY_TRAMP_TEXT))
+        #define __fix_to_virt(x)	(FIXADDR_TOP - ((x) << PAGE_SHIFT))
+            #define FIXADDR_TOP		(PCI_IO_START - SZ_2M)
+                #define PCI_IO_START		(PCI_IO_END - PCI_IO_SIZE)
+                    #define PCI_IO_END		(VMEMMAP_START - SZ_2M)
+                        #define VMEMMAP_START		(PAGE_OFFSET - VMEMMAP_SIZE)
+                            #define VMEMMAP_SIZE (UL(1) << (VA_BITS - PAGE_SHIFT - 1 + STRUCT_PAGE_MAX_SHIFT))
+                        #define SZ_2M				0x00200000
+                    #define PCI_IO_SIZE		SZ_16M
+                        #define SZ_16M				0x01000000
+                #define SZ_2M				0x00200000
+ */
+
 	add	\dst, \dst, #(\sym - .entry.tramp.text)
+/*
+    dst = dst + (\sym - .entry.tramp.text)
+ */
+
 	.endm
 
 	// This macro corrupts x0-x3. It is the caller's duty
 	// to save/restore them if required.
 	.macro	apply_ssbd, state, tmp1, tmp2
 #ifdef CONFIG_ARM64_SSBD
+/*
+    │ Symbol: ARM64_SSBD [=y]
+    │ Type  : bool
+    │ Prompt: Speculative Store Bypass Disable
+    │   Location:
+    │ (1) -> Kernel Features
+    │   Defined at arch/arm64/Kconfig:1058
+ */
+
 alternative_cb	arm64_enable_wa2_handling
 	b	.L__asm_ssbd_skip\@
 alternative_cb_end
 	ldr_this_cpu	\tmp2, arm64_ssbd_callback_required, \tmp1
+/*
+    .macro ldr_this_cpu dst, sym, tmp
+        dst = tmp2
+        sym = arm64_ssbd_callback_required
+        tmp = tmp1
+ */
+
 	cbz	\tmp2,	.L__asm_ssbd_skip\@
+/*
+    cmp     tmp2, #0  
+        subs xzr, tmp2, #0
+            xzr = tmp2 - 0
+                                    N   Z   C   V
+                if tmp2 - 0 == 0:       1
+                if tmp2 - 0 != 0:       0
+    b.eq    .L__asm_ssbd_skip\@
+ */
+
 	ldr	\tmp2, [tsk, #TSK_TI_FLAGS]
+/*
+    tmp2 = tsk + TSK_TI_FLAGS
+    DEFINE(TSK_TI_FLAGS,		offsetof(struct task_struct, thread_info.flags));
+ */
+
 	tbnz	\tmp2, #TIF_SSBD, .L__asm_ssbd_skip\@
+/*
+    tst     tmp2, 1 << #TIF_SSBD
+        ands xzr, tmp2, 1 << #TIF_SSBD
+            xzr = tmp2 & 1 << TIF_SSBD (tmp2 = tsk + TSK_TI_FLAGS)
+                                                    N   Z   C   V
+                if tmp2 & (1 << #TIF_SSBD) == 0:        1
+                if tmp2 & (1 << #TIF_SSBD) != 0:        0
+    b.ne    .L__asm_ssbd_skip\@
+    #define TIF_SSBD		25	/* Wants SSB mitigation */
+ */
+
 	mov	w0, #ARM_SMCCC_ARCH_WORKAROUND_2
+/*
+    w0 = ARM_SMCCC_ARCH_WORKAROUND_2
+    #define ARM_SMCCC_ARCH_WORKAROUND_2					\
+        ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL,				\
+                   ARM_SMCCC_SMC_32,				\
+                   0, 0x7fff)
+ */
+
 	mov	w1, #\state
+/*
+    w1 = state
+ */
+
 alternative_cb	arm64_update_smccc_conduit
 	nop					// Patched to SMC/HVC #0
 alternative_cb_end
@@ -180,22 +262,84 @@ alternative_cb_end
 	ldr_this_cpu	tsk, __entry_task, x20	// Ensure MDSCR_EL1.SS is clear,
 	ldr	x19, [tsk, #TSK_TI_FLAGS]	// since we can unmask debug
 	disable_step_tsk x19, x20		// exceptions when scheduling.
+/*
+	.macro	disable_step_tsk, flgs, tmp
+        flgs =  x19 (x19 = tsk + TSK_TI_FLAGS)
+        tmp =   x20
+ */
 
 	apply_ssbd 1, x22, x23
+/*
+	.macro	apply_ssbd, state, tmp1, tmp2
+        state = 1
+        tmp1 =  x22
+        tmp2 =  x23
+ */
 
 	.else
 	add	x21, sp, #S_FRAME_SIZE
+/*
+    x21 = sp + S_FRAME_SIZE
+    DEFINE(S_FRAME_SIZE,		sizeof(struct pt_regs));
+ */
+
 	get_current_task tsk
+/*
+    .macro	get_current_task, rd
+        rd = tsk
+ */
+
 	/* Save the task's original addr_limit and set USER_DS */
 	ldr	x20, [tsk, #TSK_TI_ADDR_LIMIT]
+/*
+    x20 = tsk + TSK_TI_ADDR_LIMIT
+    DEFINE(TSK_TI_ADDR_LIMIT,	offsetof(struct task_struct, thread_info.addr_limit));
+ */
+
 	str	x20, [sp, #S_ORIG_ADDR_LIMIT]
+/*
+    sp + S_ORIG_ADDR_LIMIT = x20 (x20 = tsk + TSK_TI_ADDR_LIMIT)
+    DEFINE(S_ORIG_ADDR_LIMIT,	offsetof(struct pt_regs, orig_addr_limit));
+ */
+
 	mov	x20, #USER_DS
+/*
+    x20 = USER_DS
+    #define USER_DS			((UL(1) << MAX_USER_VA_BITS) - 1)
+        #define MAX_USER_VA_BITS	VA_BITS
+ */
 	str	x20, [tsk, #TSK_TI_ADDR_LIMIT]
+/*
+    tsk + TSK_TI_ADDR_LIMIT = x20 (x20 = USER_DS)
+    DEFINE(TSK_TI_ADDR_LIMIT,	offsetof(struct task_struct, thread_info.addr_limit));
+ */
+
 	/* No need to reset PSTATE.UAO, hardware's already set it to 0 for us */
 	.endif /* \el == 0 */
 	mrs	x22, elr_el1
+/*
+    x22 = elr_el1
+    ARM DDI 0487E.a - C5-383
+        ELR_EL1, Exception Link Register (EL1)
+            Purpose
+                When taking an exception to EL1, holds the address to return to.
+ */
+
 	mrs	x23, spsr_el1
+/*
+    x23 = spsr_el1
+    ARM DDI 0487E.a - C5-417
+        SPSR_EL1, Saved Program Status Register (EL1)
+            Purpose
+                Holds the saved process state when an exception is taken to EL1.
+ */
+
 	stp	lr, x21, [sp, #S_LR]
+/*
+    sp + S_LR + 0 = lr
+    sp + S_LR + 8 = x21 (x21 = sp_el0 if el == 0 else sp + S_FRAME_SIZE)
+    DEFINE(S_LR,			offsetof(struct pt_regs, regs[30]));
+ */
 
 	/*
 	 * In order to be able to dump the contents of struct pt_regs at the
@@ -204,12 +348,37 @@ alternative_cb_end
 	 */
 	.if \el == 0
 	stp	xzr, xzr, [sp, #S_STACKFRAME]
+/*
+    sp + S_STACKFRAME + 0 = xzr
+    sp + S_STACKFRAME + 8 = xzr
+    DEFINE(S_STACKFRAME,		offsetof(struct pt_regs, stackframe));
+ */
+
 	.else
 	stp	x29, x22, [sp, #S_STACKFRAME]
+/*
+    sp + S_STACKFRAME + 0 = x29 (x29 = FP)
+    sp + S_STACKFRAME + 8 = x22 (x22 = elr_el1)
+    DEFINE(S_STACKFRAME,		offsetof(struct pt_regs, stackframe));
+ */
+
 	.endif
 	add	x29, sp, #S_STACKFRAME
+/*
+    x29 = sp + S_STACKFRAME
+    DEFINE(S_STACKFRAME,		offsetof(struct pt_regs, stackframe));
+ */
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
+/*
+    │ Symbol: ARM64_SW_TTBR0_PAN [=n]
+    │ Type  : bool
+    │ Prompt: Emulate Privileged Access Never using TTBR0_EL1 switching
+    │   Location:
+    │ (1) -> Kernel Features
+    │   Defined at arch/arm64/Kconfig:1149
+ */
+
 	/*
 	 * Set the TTBR0 PAN bit in SPSR. When the exception is taken from
 	 * EL0, there is no need to check the state of TTBR0_EL1 since
@@ -219,15 +388,49 @@ alternative_cb_end
 	 * user mappings.
 	 */
 alternative_if ARM64_HAS_PAN
+/*
+    #define ARM64_HAS_PAN				4
+ */
+
 	b	1f				// skip TTBR0 PAN
 alternative_else_nop_endif
 
 	.if	\el != 0
 	mrs	x21, ttbr0_el1
+/*
+    x21 = ttbr0_el1
+    ARM DDI 0487E.a - D13-3371
+        TTBR0_EL1, Translation Table Base Register 0 (EL1)
+            Purpose
+                Holds the base address of the translation table for the initial
+                lookup for stage 1 of the translation of an address from the
+                lower VA range in the EL1&0 translation regime,
+                and other information for this translation regime.
+ */
+
 	tst	x21, #TTBR_ASID_MASK		// Check for the reserved ASID
+/*
+    ands xzr, x21, #TTBR_ASID_MASK
+        xzr = x21 & TTBR_ASID_MASK (x21 = ttbr0_el1)
+                                            N   Z   C   V
+            if x21 & TTBR_ASID_MASK == 0:       1
+            if x21 & TTBR_ASID_MASK != 0:       0
+    #define TTBR_ASID_MASK	(UL(0xffff) << 48)
+ */
+
 	orr	x23, x23, #PSR_PAN_BIT		// Set the emulated PAN in the saved SPSR
+/*
+    x23 = x23 | PSR_PAN_BIT (x23 = spsr_el1)
+    #define PSR_PAN_BIT	0x00400000
+ */
+
 	b.eq	1f				// TTBR0 access already disabled
 	and	x23, x23, #~PSR_PAN_BIT		// Clear the emulated PAN in the saved SPSR
+/*
+    x23 = x23 & ~PSR_PAN_BIT (x23 = spsr_el1 | PSR_PAN_BIT)
+    #define PSR_PAN_BIT	0x00400000
+ */
+
 	.endif
 
 	__uaccess_ttbr0_disable x21
@@ -235,11 +438,26 @@ alternative_else_nop_endif
 #endif
 
 	stp	x22, x23, [sp, #S_PC]
+/*
+    sp + S_PC + 0 = x22 (x22 = elr_el1)
+    sp + S_PC + 8 = x23 (x23 = spsr_el1)
+    DEFINE(S_PC,			offsetof(struct pt_regs, pc));
+ */
 
 	/* Not in a syscall by default (el0_svc overwrites for real syscall) */
 	.if	\el == 0
 	mov	w21, #NO_SYSCALL
+/*
+    w21 = NO_SYSCALL
+    #define NO_SYSCALL (-1)
+ */
+
 	str	w21, [sp, #S_SYSCALLNO]
+/*
+    sp + S_SYSCALLNO = w21 (w21 = NO_SYSCALL)
+    DEFINE(S_SYSCALLNO,		offsetof(struct pt_regs, syscallno));
+ */
+
 	.endif
 
 	/*
@@ -247,12 +465,37 @@ alternative_else_nop_endif
 	 */
 	.if	\el == 0
 	msr	sp_el0, tsk
+/*
+    sp_el0 = tsk
+    ARM DDI 0487E.a - C5-406
+        SP_EL1, Stack Pointer (EL1)
+            Purpose
+                Holds the stack pointer associated with EL1. When executing at EL1,
+                the value of SPSel.SP determines the current stack pointer:
+                    SPSel.SP    Current stack pointer
+                    0b0         SP_EL0
+                    0b1         SP_EL1
+ */
 	.endif
 
 	/* Save pmr */
 alternative_if ARM64_HAS_IRQ_PRIO_MASKING
+/*
+    #define ARM64_HAS_IRQ_PRIO_MASKING		42
+ */
+
 	mrs_s	x20, SYS_ICC_PMR_EL1
+/*
+    x20 = SYS_ICC_PMR_EL1
+    #define SYS_ICC_PMR_EL1			sys_reg(3, 0, 4, 6, 0)
+ */
+
 	str	x20, [sp, #S_PMR_SAVE]
+/*
+    sp + S_PMR_SAVE = x20 (x20 = SYS_ICC_PMR_EL1)
+    DEFINE(S_PMR_SAVE,		offsetof(struct pt_regs, pmr_save));
+ */
+
 alternative_else_nop_endif
 
 	/*
@@ -270,35 +513,102 @@ alternative_else_nop_endif
 
 	/* Restore the task's original addr_limit. */
 	ldr	x20, [sp, #S_ORIG_ADDR_LIMIT]
+/*
+    x20 = sp + S_ORIG_ADDR_LIMIT
+    DEFINE(S_ORIG_ADDR_LIMIT,	offsetof(struct pt_regs, orig_addr_limit));
+ */
+
 	str	x20, [tsk, #TSK_TI_ADDR_LIMIT]
+/*
+    tsk + TSK_TI_ADDR_LIMIT = x20 (x20 = sp + S_ORIG_ADDR_LIMIT)
+    DEFINE(TSK_TI_ADDR_LIMIT,	offsetof(struct task_struct, thread_info.addr_limit));
+ */
 
 	/* No need to restore UAO, it will be restored from SPSR_EL1 */
+/*
+    ARM DDI 0487E.a - C5-417
+        SPSR_EL1, Saved Program Status Register (EL1)
+            Purpose
+                Holds the saved process state when an exception is taken to EL1.
+            Field descriptions
+                UAO, bit [23]
+                    User Access Override. Set to the value of PSTATE.UAO on taking an exception to EL1,
+                    and copied to PSTATE.UAO on executing an exception return operation in EL1.
+                    This field resets to an architecturally UNKNOWN value.
+
+    ARM DDI 0487E.a - C5-457
+        UAO, User Access Override
+            Purpose
+                Allows access to the User Access Override bit.
+ */
+
 	.endif
 
 	/* Restore pmr */
 alternative_if ARM64_HAS_IRQ_PRIO_MASKING
+/*
+    #define ARM64_HAS_IRQ_PRIO_MASKING		42
+ */
+
 	ldr	x20, [sp, #S_PMR_SAVE]
+/*
+    x20 = sp + S_PMR_SAVE
+    DEFINE(S_PMR_SAVE,		offsetof(struct pt_regs, pmr_save));
+ */
+
 	msr_s	SYS_ICC_PMR_EL1, x20
+/*
+    SYS_ICC_PMR_EL1 = x20 (x20 = sp + S_PMR_SAVE)
+    #define SYS_ICC_PMR_EL1			sys_reg(3, 0, 4, 6, 0)
+ */
+
 	/* Ensure priority change is seen by redistributor */
 	dsb	sy
 alternative_else_nop_endif
 
 	ldp	x21, x22, [sp, #S_PC]		// load ELR, SPSR
+/*
+    x21 = sp + S_PC + 0
+    x22 = sp + S_PC + 8
+    DEFINE(S_PC,			offsetof(struct pt_regs, pc));
+ */
 	.if	\el == 0
 	ct_user_enter
 	.endif
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
+/*
+    │ Symbol: ARM64_SW_TTBR0_PAN [=n]
+    │ Type  : bool
+    │ Prompt: Emulate Privileged Access Never using TTBR0_EL1 switching
+    │   Location:
+    │ (1) -> Kernel Features
+    │   Defined at arch/arm64/Kconfig:1149
+ */
+
 	/*
 	 * Restore access to TTBR0_EL1. If returning to EL0, no need for SPSR
 	 * PAN bit checking.
 	 */
 alternative_if ARM64_HAS_PAN
+/*
+    #define ARM64_HAS_PAN				4
+ */
+
 	b	2f				// skip TTBR0 PAN
 alternative_else_nop_endif
 
 	.if	\el != 0
 	tbnz	x22, #22, 1f			// Skip re-enabling TTBR0 access if the PSR_PAN_BIT is set
+/*
+    tst     x22, 1 << #22
+        ands xzr, x22, 1 << #22
+            xzr = x22 & (1 << 22)
+                                            N   Z   C   V
+                if x22 & (1 << 22) == 0:        1
+                if x22 & (1 << 22) != 0:        0
+    b.ne    1f
+ */
 	.endif
 
 	__uaccess_ttbr0_enable x0, x1
@@ -315,23 +625,98 @@ alternative_else_nop_endif
 1:
 	.if	\el != 0
 	and	x22, x22, #~PSR_PAN_BIT		// ARMv8.0 CPUs do not understand this bit
+/*
+    x22 = x22 & ~PSR_PAN_BIT (x22 = sp + S_PC + 8)
+    #define PSR_PAN_BIT	0x00400000
+ */
+
 	.endif
 2:
 #endif
 
 	.if	\el == 0
 	ldr	x23, [sp, #S_SP]		// load return stack pointer
+/*
+    x23 = sp + S_SP
+    DEFINE(S_SP,			offsetof(struct pt_regs, sp));
+ */
+
 	msr	sp_el0, x23
+/*
+    sp_el0 = x23 (x23 = sp + S_SP)
+    ARM DDI 0487E.a - C5-404
+        SP_EL0, Stack Pointer (EL0)
+            Purpose
+                Holds the stack pointer associated with EL0. At higher Exception levels,
+                this is used as the current stack pointer when the value of SPSel.SP is 0.
+ */
+
 	tst	x22, #PSR_MODE32_BIT		// native task?
+/*
+    ands xzr, x22, #PSR_MODE32_BIT 
+        xzr = x22 & PSR_MODE32_BIT (x22 = (sp + S_PC + 8) & ~PSR_PAN_BIT)
+                                            N   Z   C   V
+            if x22 & PSR_MODE32_BIT == 0:       1
+            if x22 & PSR_MODE32_BIT != 0:       0
+    #define PSR_MODE32_BIT		0x00000010
+ */
+
 	b.eq	3f
 
 #ifdef CONFIG_ARM64_ERRATUM_845719
+/*
+    │ Symbol: ARM64_ERRATUM_845719 [=y]
+    │ Type  : bool
+    │ Prompt: Cortex-A53: 845719: a load might read incorrect data
+    │   Location:
+    │     -> Kernel Features
+    │ (1)   -> ARM errata workarounds via the alternatives framework
+    │   Defined at arch/arm64/Kconfig:430
+    │   Depends on: COMPAT [=y]
+    │   Selected by [y]:
+    │   - ARCH_MXC [=y] && COMPAT [=y]
+ */
+
 alternative_if ARM64_WORKAROUND_845719
+/*
+    #define ARM64_WORKAROUND_845719			2
+ */
+
 #ifdef CONFIG_PID_IN_CONTEXTIDR
+/*
+    │ Symbol: PID_IN_CONTEXTIDR [=n]
+    │ Type  : bool
+    │ Prompt: Write the current PID to the CONTEXTIDR register
+    │   Location:
+    │ (1) -> Kernel hacking
+    │   Defined at arch/arm64/Kconfig.debug:19 
+ */
+
 	mrs	x29, contextidr_el1
+/*
+    x29 = contextidr_el1
+    ARM DDI 0487E.a - D13-2886
+        CONTEXTIDR_EL1, Context ID Register (EL1)
+            Purpose
+                Identifies the current Process Identifier.
+                The value of the whole of this register is called the Context ID and is used by:
+                    • The debug logic, for Linked and Unlinked Context ID matching.
+                    • The trace logic, to identify the current process.
+                The significance of this register is for debug and trace use only.
+                This register is used when ARMv8.1-VHE is not implemented, or whenARMv8.1-VHE is implemented and HCR_EL2.E2H is set to 0.
+ */
+
 	msr	contextidr_el1, x29
+/*
+    contextidr_el1 = x29
+ */
+
 #else
 	msr contextidr_el1, xzr
+/*
+    contextidr_el1 = xzr
+ */
+
 #endif
 alternative_else_nop_endif
 #endif
@@ -340,8 +725,29 @@ alternative_else_nop_endif
 	.endif
 
 	msr	elr_el1, x21			// set up the return data
+/*
+    elr_el1 = x21 (x21 = sp + S_PC + 0)
+    ARM DDI 0487E.a - C5-383
+        ELR_EL1, Exception Link Register (EL1)
+            Purpose
+                When taking an exception to EL1, holds the address to return to.
+ */
+
 	msr	spsr_el1, x22
+/*
+    spsr_el1 = x22 (x22 = sp + S_PC + 8 if el == 0 else (sp + S_PC + 8) & ~PSR_PAN_BIT)
+    ARM DDI 0487E.a - C5-417
+        SPSR_EL1, Saved Program Status Register (EL1)
+            Purpose
+                Holds the saved process state when an exception is taken to EL1.
+ */
+
 	ldp	x0, x1, [sp, #16 * 0]
+/*
+    x0 = sp + (16 * 0) + 0
+    x1 = sp + (16 * 0) + 8
+ */
+
 	ldp	x2, x3, [sp, #16 * 1]
 	ldp	x4, x5, [sp, #16 * 2]
 	ldp	x6, x7, [sp, #16 * 3]
@@ -357,17 +763,56 @@ alternative_else_nop_endif
 	ldp	x26, x27, [sp, #16 * 13]
 	ldp	x28, x29, [sp, #16 * 14]
 	ldr	lr, [sp, #S_LR]
+/*
+    lr = sp + S_LR
+    DEFINE(S_LR,			offsetof(struct pt_regs, regs[30]));
+ */
+
 	add	sp, sp, #S_FRAME_SIZE		// restore sp
+/*
+    sp = sp + S_FRAME_SIZE
+    DEFINE(S_FRAME_SIZE,		sizeof(struct pt_regs));
+ */
 
 	.if	\el == 0
 alternative_insn eret, nop, ARM64_UNMAP_KERNEL_AT_EL0
 #ifdef CONFIG_UNMAP_KERNEL_AT_EL0
+/*
+    │ Symbol: UNMAP_KERNEL_AT_EL0 [=y]
+    │ Type  : bool
+    │ Prompt: Unmap kernel when running in userspace (aka "KAISER")
+    │   Location:
+    │ (1) -> Kernel Features
+    │   Defined at arch/arm64/Kconfig:1013
+ */
+
 	bne	4f
 	msr	far_el1, x30
+/*
+    far_el1 = x30 (x30 = LR)
+    ARM DDI 0487E.a - D13-3034
+        FAR_EL1, Fault Address Register (EL1)
+            Purpose
+                Holds the faulting Virtual Address for all synchronous Instruction or Data Abort,
+                PC alignment fault and Watchpoint exceptions that are taken to EL1.
+ */
+
 	tramp_alias	x30, tramp_exit_native
+/*
+    .macro tramp_alias, dst, sym
+        dst = x30
+        sym = tramp_exit_native
+ */
+
 	br	x30
 4:
 	tramp_alias	x30, tramp_exit_compat
+/*
+    .macro tramp_alias, dst, sym
+        dst = x30
+        sym = tramp_exit_compat
+ */
+
 	br	x30
 #endif
 	.else
@@ -978,9 +1423,37 @@ alternative_else_nop_endif
 
 	.macro tramp_unmap_kernel, tmp
 	mrs	\tmp, ttbr1_el1
+/*
+    tmp = ttbr1_el1
+    ARM DDI 0487E.a - D13-3384
+        TTBR1_EL1, Translation Table Base Register 1 (EL1)
+            Purpose
+                Holds the base address of the translation table for the initial
+                lookup for stage 1 of the translation of an address from the
+                higher VA range in the EL1&0 stage 1 translation regime,
+                and other information for this translation regime.
+ */
+
 	sub	\tmp, \tmp, #(PAGE_SIZE + RESERVED_TTBR0_SIZE)
+/*
+    tmp = tmp - (PAGE_SIZE + RESERVED_TTBR0_SIZE)
+    #define PAGE_SIZE		(_AC(1, UL) << PAGE_SHIFT)
+        #define PAGE_SHIFT		CONFIG_ARM64_PAGE_SHIFT
+    #define RESERVED_TTBR0_SIZE	(0)
+ */
+
 	orr	\tmp, \tmp, #USER_ASID_FLAG
+/*
+    tmp = tmp | USER_ASID_FLAG
+    #define USER_ASID_FLAG	(UL(1) << USER_ASID_BIT)
+        #define USER_ASID_BIT	48
+ */
+
 	msr	ttbr1_el1, \tmp
+/*
+    ttbr1_el1 = tmp
+ */
+
 	/*
 	 * We avoid running the post_ttbr_update_workaround here because
 	 * it's only needed by Cavium ThunderX, which requires KPTI to be
@@ -993,6 +1466,16 @@ alternative_else_nop_endif
 1:
 	.if	\regsize == 64
 	msr	tpidrro_el0, x30	// Restored in kernel_ventry
+/*
+    tpidrro_el0 = x30
+    ARM DDI 0487E.a - D13-3369
+        TPIDRRO_EL0, EL0 Read-Only Software Thread ID Register
+            Purpose
+                Provides a location where software executing at EL1 or higher
+                can store thread identifying information that is visible to
+                software executing at EL0, for OS management purposes.
+ */
+
 	.endif
 	/*
 	 * Defend against branch aliasing attacks by pushing a dummy
@@ -1019,10 +1502,31 @@ alternative_insn isb, nop, ARM64_WORKAROUND_QCOM_FALKOR_E1003
 
 	.macro tramp_exit, regsize = 64
 	adr	x30, tramp_vectors
+/*
+    x30 = tramp_vectors의 주소
+ */
+
 	msr	vbar_el1, x30
+/*
+    vbar_el1 = x30 (x30 = tramp_vectors의 주소)
+    ARM DDI 0487E.a - D13-3394
+        VBAR_EL1, Vector Base Address Register (EL1)
+            Purpose
+                Holds the vector base address for any exception that is taken to EL1.
+ */
+
 	tramp_unmap_kernel	x30
 	.if	\regsize == 64
 	mrs	x30, far_el1
+/*
+    x30 = far_el1
+    ARM DDI 0487E.a - D13-3034
+        FAR_EL1, Fault Address Register (EL1)
+            Purpose
+                Holds the faulting Virtual Address for all synchronous Instruction or Data Abort,
+                PC alignment fault and Watchpoint exceptions that are taken to EL1.
+ */
+
 	.endif
 	eret
 	sb

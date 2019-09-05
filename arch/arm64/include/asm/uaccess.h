@@ -107,6 +107,15 @@ static inline unsigned long __range_ok(const void __user *addr, unsigned long si
  * User access enabling/disabling.
  */
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
+/*
+    │ Symbol: ARM64_SW_TTBR0_PAN [=n]
+    │ Type  : bool
+    │ Prompt: Emulate Privileged Access Never using TTBR0_EL1 switching
+    │   Location:
+    │ (1) -> Kernel Features
+    │   Defined at arch/arm64/Kconfig:1149
+ */
+
 static inline void __uaccess_ttbr0_disable(void)
 {
 	unsigned long flags, ttbr;

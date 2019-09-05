@@ -734,7 +734,11 @@
 	.equ	.L__reg_num_xzr, 31
 
 	.macro	mrs_s, rt, sreg
-	 __emit_inst(0xd5200000|(\sreg)|(.L__reg_num_\rt))
+	__emit_inst(0xd5200000|(\sreg)|(.L__reg_num_\rt))
+/*
+	#define __emit_inst(x)			.inst (x)
+ */
+
 	.endm
 
 	.macro	msr_s, sreg, rt

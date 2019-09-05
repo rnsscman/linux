@@ -68,6 +68,17 @@
 #define KERNEL_END        _end
 
 #ifdef CONFIG_ARM64_USER_VA_BITS_52
+/*
+    │ Symbol: ARM64_USER_VA_BITS_52 [=n]
+    │ Type  : bool
+    │ Prompt: 52-bit (user)
+    │   Location:
+    │     -> Kernel Features
+    │ (1)   -> Virtual address space size (<choice> [=y])
+    │   Defined at arch/arm64/Kconfig:724
+    │   Depends on: <choice> && ARM64_64K_PAGES [=n] && (ARM64_PAN [=y] || !ARM64_SW_TTBR0_PAN [=n])
+ */
+
 #define MAX_USER_VA_BITS	52
 #else
 #define MAX_USER_VA_BITS	VA_BITS

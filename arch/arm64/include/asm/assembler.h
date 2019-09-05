@@ -41,6 +41,14 @@
 
 	.macro disable_daif
 	msr	daifset, #0xf
+/*
+    daifset = 0xf
+    ARM DDI 0487E.a - C5-377
+        DAIF, Interrupt Mask Bits
+            Purpose
+                Allows access to the interrupt mask bits.
+ */
+
 	.endm
 
 	.macro enable_daif
@@ -80,9 +88,42 @@
 
 	.macro	disable_step_tsk, flgs, tmp
 	tbz	\flgs, #TIF_SINGLESTEP, 9990f
+/*
+    tst     flgs, 1 << #TIF_SINGLESTEP
+        ands xzr, flgs, 1 << #TIF_SINGLESTEP
+            xzr = flgs & (1 << TIF_SINGLESTEP)
+                                                        N   Z   C   V
+                if flgs & (1 << TIF_SINGLESTEP) == 0:       1
+                if flgs & (1 << TIF_SINGLESTEP) != 0:       0
+    b.eq    9990f
+    #define TIF_SINGLESTEP		21
+ */
+
 	mrs	\tmp, mdscr_el1
+/*
+    tmp = mdscr_el1
+    ARM DDI 0487E.a - D13-3497
+        MDSCR_EL1, Monitor Debug System Control Register
+            Purpose
+                Main control register for the debug implementation.
+            Field descriptions
+                SS, bit [0]
+                    Software step control bit. If EL D is using AArch64, enable Software step. Permitted values are:
+                        0b0 Software step disabled
+                        0b1 Software step enabled.
+ */
+
 	bic	\tmp, \tmp, #DBG_MDSCR_SS
+/*
+    tmp = tmp & ~DBG_MDSCR_SS
+    #define DBG_MDSCR_SS		(1 << 0)
+ */
+
 	msr	mdscr_el1, \tmp
+/*
+    mdscr_el1 = tmp (tmp = mdscr_el1 & ~DBG_MDSCR_SS)
+ */
+
 	isb	// Synchronise with enable_dbg
 9990:
 	.endm
@@ -272,12 +313,42 @@ alternative_endif
 	 */
 	.macro ldr_this_cpu dst, sym, tmp
 	adr_l	\dst, \sym
+/*
+    dst = sym의 주소
+ */
+
 alternative_if_not ARM64_HAS_VIRT_HOST_EXTN
+/*
+    #define ARM64_HAS_VIRT_HOST_EXTN		11
+ */
+
 	mrs	\tmp, tpidr_el1
+/*
+    tmp = tpidr_el1
+    ARM DDI 0487E.a - D13-3363
+        TPIDR_EL1, EL1 Software Thread ID Register
+            Purpose
+                Provides a location where software executing at EL1 can store thread identifying information,
+                for OS management purposes.
+ */
+
 alternative_else
 	mrs	\tmp, tpidr_el2
+/*
+    tmp = tpidr_el2
+    ARM DDI 0487E.a - D13-3365
+        TPIDR_EL2, EL2 Software Thread ID Register
+            Purpose
+                Provides a location where software executing at EL2 can store thread identifying information,
+                for OS management purposes.
+ */
+
 alternative_endif
 	ldr	\dst, [\dst, \tmp]
+/*
+    dst = dst + tmp
+ */
+
 	.endm
 
 /*
@@ -533,6 +604,15 @@ USER(\label, ic	ivau, \tmp2)			// invalidate I line PoU
  */
 	.macro	get_current_task, rd
 	mrs	\rd, sp_el0
+/*
+    rd = sp_el0
+    ARM DDI 0487E.a - C5-404
+        SP_EL0, Stack Pointer (EL0)
+            Purpose
+                Holds the stack pointer associated with EL0. At higher Exception levels,
+                this is used as the current stack pointer when the value of SPSel.SP is 0.
+ */
+
 	.endm
 
 /*
