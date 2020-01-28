@@ -159,21 +159,106 @@ ENTRY(__inval_dcache_area)
  */
 __dma_inv_area:
 	add	x1, x1, x0
+/*
+    x1 = x1 + x0 (x0 = start, x1 = size)
+ */
+
 	dcache_line_size x2, x3
+/*
+    .macro	dcache_line_size, reg, tmp
+        reg = x2
+        tmp = x3
+
+    x2 = dcache_line_size
+ */
+
 	sub	x3, x2, #1
+/*
+    x3 = x2 - 1 (x2 = dcache_line_size)
+ */
+
 	tst	x1, x3				// end cache line aligned?
+/*
+    x1 = start + size
+    x3 = dcache_line_size - 1
+
+    ands xzr, x1, x3
+        xzr = x1 & x3
+                                N   Z   C   V
+            if x1 & x3 == 0:        1
+            if x1 & x3 != 0:        0
+ */
+
 	bic	x1, x1, x3
+/*
+    x1 = x1 & ~x3
+ */
+
 	b.eq	1f
+/*
+    if Z == 1
+        goto 1f
+ */
+
 	dc	civac, x1			// clean & invalidate D / U line
 1:	tst	x0, x3				// start cache line aligned?
+/*
+    x0 = start
+    x3 = dcache_line_size - 1
+
+    ands xzr, x0, x3
+        xzr = x0 & x3
+                                N   Z   C   V
+            if x0 & x3 == 0:        1
+            if x0 & x3 != 0:        0
+ */
+
 	bic	x0, x0, x3
+/*
+    x0 = x0 & ~x3
+ */
+
 	b.eq	2f
+/*
+    if Z == 1
+        goto 2f
+ */
+
 	dc	civac, x0			// clean & invalidate D / U line
 	b	3f
+/*
+    goto 3f
+ */
+
 2:	dc	ivac, x0			// invalidate D / U line
 3:	add	x0, x0, x2
+/*
+    x0 = start & ~(dcache_line_size - 1)
+    x2 = dcache_line_size
+
+    x0 = x0 + x2 
+ */
+
 	cmp	x0, x1
+/*
+    x0 = (start & ~(dcache_line_size - 1)) + (dcache_line_size * (n + 1))
+        n = the number of below b.lo
+    x1 = (start + size) & ~(dcache_line_size - 1)
+
+    subs xzr, x0, x1
+        xzr = x0 - x1
+                        N   Z   C   V
+            if x0 > x1:         1
+            if x0 = x1:         1
+            if x0 < x1:         0
+ */
+
 	b.lo	2b
+/*
+    if C == 0
+        goto 2b
+ */
+
 	dsb	sy
 	ret
 ENDPIPROC(__inval_dcache_area)

@@ -46,6 +46,9 @@
 #include "efi-header.S"
 
 #define __PHYS_OFFSET	(KERNEL_START - TEXT_OFFSET)
+/*
+    #define KERNEL_START      _text
+ */
 
 #if (TEXT_OFFSET & 0xfff) != 0
 #error TEXT_OFFSET must be at least 4KB aligned
@@ -71,29 +74,75 @@
  * in the entry routines.
  */
 	__HEAD
+/*
+    ?
+ */
+
 _head:
 	/*
 	 * DO NOT MODIFY. Image header expected by Linux boot-loaders.
 	 */
 #ifdef CONFIG_EFI
+/*
+    Symbol: EFI [=y]
+    Type  : bool
+    Prompt: UEFI runtime support
+    	UEFI: Unified Extensible Firmware Interface
+ */
+
 	/*
 	 * This add instruction has no meaningful effect except that
 	 * its opcode forms the magic "MZ" signature required by UEFI.
 	 */
 	add	x13, x18, #0x16
+/*
+    x13 = x18 + 0x16 (x18 = ?)
+ */
+
 	b	stext
 #else
 	b	stext				// branch to kernel start, magic
 	.long	0				// reserved
+/*
+    DUI0774J - 9-272
+        Directive   Aliases
+        .word       .4byte, .long, .int, .dc.l, .dc.a (AArch32 only)
+        .quad       .8byte, .xword (AArch64 only), .dc.a (AArch64 only)
+
+    32-bit memory location, initialized to 0
+ */
+
 #endif
 	le64sym	_kernel_offset_le		// Image load offset from start of RAM, little-endian
+/*
+    .macro	le64sym, sym
+        sym = _kernel_offset_le
+ */
+
 	le64sym	_kernel_size_le			// Effective size of kernel image, little-endian
 	le64sym	_kernel_flags_le		// Informative flags, little-endian
 	.quad	0				// reserved
 	.quad	0				// reserved
 	.quad	0				// reserved
 	.ascii	ARM64_IMAGE_MAGIC		// Magic number
+/*
+    DUI0774J - 9-274
+        Syntax
+            .ascii "string"
+        Description
+            .ascii
+                The .ascii directive does not append a null byte to the end of the string.
+
+    #define ARM64_IMAGE_MAGIC	"ARM\x64"
+ */
+
 #ifdef CONFIG_EFI
+/*
+    Symbol: EFI [=y]
+    Type  : bool
+    Prompt: UEFI runtime support
+ */
+
 	.long	pe_header - _head		// Offset to the PE header.
 
 pe_header:
@@ -136,15 +185,35 @@ ENDPROC(stext)
  */
 preserve_boot_args:
 	mov	x21, x0				// x21=FDT
+/*
+    x21 = x0 (x0 = FDT; Flattened Device Tree)
+ */
 
 	adr_l	x0, boot_args			// record the contents of
+/*
+    x0 = &boot_args
+ */
+
 	stp	x21, x1, [x0]			// x0 .. x3 at kernel entry
+/*
+    x0 + 0 = x21 (x21 = FDT)
+    x0 + 8 = x1 (x1 = ?)
+ */
+
 	stp	x2, x3, [x0, #16]
+/*
+    x0 + 16 = x2 (x2 = ?)
+    x0 + 24 = x3 (x3 = ?)
+ */
 
 	dmb	sy				// needed before dc ivac with
 						// MMU off
 
 	mov	x1, #0x20			// 4 x 8 bytes
+/*
+    x1 = 0x20
+ */
+
 	b	__inval_dcache_area		// tail call
 ENDPROC(preserve_boot_args)
 

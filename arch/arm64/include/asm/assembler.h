@@ -299,10 +299,30 @@ alternative_endif
  */
 	.macro	read_ctr, reg
 alternative_if_not ARM64_MISMATCHED_CACHE_TYPE
+/*
+    #define ARM64_MISMATCHED_CACHE_TYPE		31
+ */
+
 	mrs	\reg, ctr_el0			// read CTR
+/*
+    reg = ctr_el0
+
+    ARM DDI 0487E.a - D13-2912
+        CTR_EL0, Cache Type Register
+            Purpose
+                Provides information about the architecture of the caches.
+ */
+
 	nop
 alternative_else
 	ldr_l	\reg, arm64_ftr_reg_ctrel0 + ARM64_FTR_SYSVAL
+/*
+    reg = arm64_ftr_reg_ctrel0 + ARM64_FTR_SYSVAL
+
+    struct arm64_ftr_reg arm64_ftr_reg_ctrel0 = {
+    DEFINE(ARM64_FTR_SYSVAL,	offsetof(struct arm64_ftr_reg, sys_val));
+ */
+
 alternative_endif
 	.endm
 
@@ -323,9 +343,26 @@ alternative_endif
  */
 	.macro	dcache_line_size, reg, tmp
 	read_ctr	\tmp
+/*
+    .macro	read_ctr, reg
+        reg = tmp
+ */
+
 	ubfm		\tmp, \tmp, #16, #19	// cache line size encoding
+/*
+	tmp = tmp[19:16]
+ */
+
 	mov		\reg, #4		// bytes per word
+/*
+    reg = 4
+ */
+
 	lsl		\reg, \reg, \tmp	// actual cache line size
+/*
+    reg = reg << tmp
+ */
+
 	.endm
 
 /*
