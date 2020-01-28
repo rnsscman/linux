@@ -178,12 +178,38 @@ ENDPROC(preserve_boot_args)
  */
 	.macro populate_entries, tbl, rtbl, index, eindex, flags, inc, tmp1
 .Lpe\@:	phys_to_pte \tmp1, \rtbl
+    /*
+        .macro	phys_to_pte, pte, phys
+        mov	\pte, \phys
+        tmp1 = rtbl
+     */
+
 	orr	\tmp1, \tmp1, \flags	// tmp1 = table entry
+    /*
+        tmp1 = tmp1 | flags
+     */
+
 	str	\tmp1, [\tbl, \index, lsl #3]
+    /*
+        tbl + (index * 8) = tmp1
+     */
+
 	add	\rtbl, \rtbl, \inc	// rtbl = pa next level
+    /*
+        rtbl = rtbl + inc
+     */
+
 	add	\index, \index, #1
+    /*
+        index = index + 1
+     */
+
 	cmp	\index, \eindex
 	b.ls	.Lpe\@
+    /*
+        Less than or equal to (unsigned).
+        (C = 0) || (Z = 1)
+     */
 	.endm
 
 /*
@@ -205,21 +231,76 @@ ENDPROC(preserve_boot_args)
  * Returns:	istart, iend, count
  */
 	.macro compute_indices, vstart, vend, shift, ptrs, istart, iend, count
+    /*
+        GET iend
+     */
 	lsr	\iend, \vend, \shift
+    /*
+        iend = vend >> shift
+     */
+
 	mov	\istart, \ptrs
+    /*
+        istart = ptrs
+     */
+
 	sub	\istart, \istart, #1
+    /*
+        istart = istart - 1
+     */
+
 	and	\iend, \iend, \istart	// iend = (vend >> shift) & (ptrs - 1)
+    /*
+        iend = iend & istart
+        한 개 페이지 테이블의 끝 인덱스
+     */
+
 	mov	\istart, \ptrs
+    /*
+        istart = ptrs
+     */
+
 	mul	\istart, \istart, \count
+    /*
+        istart = istart * count
+     */
+
 	add	\iend, \iend, \istart	// iend += (count - 1) * ptrs
 					// our entries span multiple tables
+    /*
+        iend = iend + istart
+        iend = iend + (count * ptrs)
+        이전 페이지 테이블의 엔트리 개수만큼 페이지 테이블이 필요
+     */
 
+    /*
+        GET istart
+     */
 	lsr	\istart, \vstart, \shift
+    /*
+        istart = vstart >> shift
+     */
+
 	mov	\count, \ptrs
+    /*
+        count = ptrs
+     */
+
 	sub	\count, \count, #1
+    /*
+        count = count - 1
+     */
+
 	and	\istart, \istart, \count
+    /*
+        istart = istart & count
+        istart = (vstart >> shift) & count */
+     */
 
 	sub	\count, \iend, \istart
+    /*
+        count = iend - istart
+     */
 	.endm
 
 /*
@@ -241,12 +322,31 @@ ENDPROC(preserve_boot_args)
  */
 	.macro map_memory, tbl, rtbl, vstart, vend, flags, phys, pgds, istart, iend, tmp, count, sv
 	add \rtbl, \tbl, #PAGE_SIZE
+    /*
+       rtbl = tbl + PAGE_SIZE
+     */
+
 	mov \sv, \rtbl
+    /*
+       sv = tbl
+     */
+
 	mov \count, #0
+    /*
+       count = 0
+     */
+
 	compute_indices \vstart, \vend, #PGDIR_SHIFT, \pgds, \istart, \iend, \count
 	populate_entries \tbl, \rtbl, \istart, \iend, #PMD_TYPE_TABLE, #PAGE_SIZE, \tmp
 	mov \tbl, \sv
+    /*
+       tbl = sv
+     */
+
 	mov \sv, \rtbl
+    /*
+       sv = rtbl
+     */
 
 #if SWAPPER_PGTABLE_LEVELS > 3
 	compute_indices \vstart, \vend, #PUD_SHIFT, #PTRS_PER_PUD, \istart, \iend, \count
@@ -263,6 +363,9 @@ ENDPROC(preserve_boot_args)
 
 	compute_indices \vstart, \vend, #SWAPPER_BLOCK_SHIFT, #PTRS_PER_PTE, \istart, \iend, \count
 	bic \count, \phys, #SWAPPER_BLOCK_SIZE - 1
+    /*
+        count = phys & ~(SWAPPER_BLOCK_SIZE - 1)
+     */
 	populate_entries \tbl, \count, \istart, \iend, \flags, #SWAPPER_BLOCK_SIZE, \tmp
 	.endm
 
@@ -344,8 +447,54 @@ __create_page_tables:
 	dc	ivac, x6		// Invalidate potentially stale cache line
 
 #if (VA_BITS < 48)
+    /*
+        #define VA_BITS			(CONFIG_ARM64_VA_BITS)
+     */
 #define EXTRA_SHIFT	(PGDIR_SHIFT + PAGE_SHIFT - 3)
+    /*
+        EXTRA_SHIFT =
+            48 = 39 + 12 - 3 if CONFIG_PGTABLE_LEVELS == 4 and PAGE_SHIFT == 12
+            39 = 30 + 12 - 3 if CONFIG_PGTABLE_LEVELS == 3 and PAGE_SHIFT == 12
+            30 = 21 + 12 - 3 if CONFIG_PGTABLE_LEVELS == 2 and PAGE_SHIFT == 12
+
+        PGDIR_SHIFT =
+            39 = ((12 - 3) * (4 - (4 - 4)) + 3) if CONFIG_PGTABLE_LEVELS == 4 and PAGE_SHIFT == 12
+            30 = ((12 - 3) * (4 - (4 - 3)) + 3) if CONFIG_PGTABLE_LEVELS == 3 and PAGE_SHIFT == 12
+            21 = ((12 - 3) * (4 - (4 - 2)) + 3) if CONFIG_PGTABLE_LEVELS == 2 and PAGE_SHIFT == 12
+
+        #define PGDIR_SHIFT		ARM64_HW_PGTABLE_LEVEL_SHIFT(4 - CONFIG_PGTABLE_LEVELS)
+            #define ARM64_HW_PGTABLE_LEVEL_SHIFT(n)	((PAGE_SHIFT - 3) * (4 - (n)) + 3)
+                #define PAGE_SHIFT		CONFIG_ARM64_PAGE_SHIFT
+                    The Linux kernel configuration item CONFIG_ARM64_PAGE_SHIFT:
+                        prompt:
+                        type: int
+                        depends on: ( CONFIG_ARM64_64K_PAGES ) && ( CONFIG_ARM64_16K_PAGES )
+                        defined in arch/arm64/Kconfig
+                        found in Linux kernels: 4.7–4.20, 5.0–5.2, 5.3-rc+HEAD
+
+                #define PAGE_SHIFT	12
+
+            The configuration item CONFIG_PGTABLE_LEVELS:
+                prompt:
+                type: int
+                depends on: ( CONFIG_ARM64_16K_PAGES && CONFIG_ARM64_VA_BITS_36 ) &&
+                            ( CONFIG_ARM64_64K_PAGES && CONFIG_ARM64_VA_BITS_42 ) &&
+                            ( CONFIG_ARM64_64K_PAGES && ( CONFIG_ARM64_VA_BITS_48 || CONFIG_ARM64_USER_VA_BITS_52 )) &&
+                            ( CONFIG_ARM64_4K_PAGES && CONFIG_ARM64_VA_BITS_39 ) &&
+                            ( CONFIG_ARM64_16K_PAGES && CONFIG_ARM64_VA_BITS_47 ) &&
+                            (! CONFIG_ARM64_64K_PAGES && CONFIG_ARM64_VA_BITS_48 )
+                defined in arch/arm64/Kconfig
+                found in Linux kernels: 4.1–4.20, 5.0–5.2, 5.3-rc+HEAD
+     */
+
 #define EXTRA_PTRS	(1 << (PHYS_MASK_SHIFT - EXTRA_SHIFT))
+    /*
+        EXTRA_PTRS =
+
+        #define PHYS_MASK_SHIFT		(CONFIG_ARM64_PA_BITS)
+
+        #define EXTRA_SHIFT	(PGDIR_SHIFT + PAGE_SHIFT - 3)
+     */
 
 	/*
 	 * If VA_BITS < 48, we have to configure an additional table level.
@@ -355,39 +504,133 @@ __create_page_tables:
 	 * translation level to be configured.
 	 */
 #if VA_BITS != EXTRA_SHIFT
+    /*
+     */
 #error "Mismatch between VA_BITS and page size/number of translation levels"
 #endif
 
 	mov	x4, EXTRA_PTRS
+    /*
+        x4 = EXTRA_PTRS
+     */
 	create_table_entry x0, x3, EXTRA_SHIFT, x4, x5, x6
+    /*
+        .macro	create_table_entry, tbl,    virt,   shift,          ptrs,   tmp1,   tmp2
+        create_table_entry          x0,     x3,     EXTRA_SHIFT,    x4,     x5,     x6
+     */
 #else
 	/*
 	 * If VA_BITS == 48, we don't have to configure an additional
 	 * translation level, but the top-level table has more entries.
 	 */
 	mov	x4, #1 << (PHYS_MASK_SHIFT - PGDIR_SHIFT)
+    /*
+        x4 = 1 << (PHYS_MASK_SHIFT - PGDIR_SHIFT)
+        PHYS_MASK_SHIFT = 
+            ./arch/arm64/include/asm/pgtable-hwdef.h
+            #define PHYS_MASK_SHIFT		(CONFIG_ARM64_PA_BITS)
+                CONFIG_ARM64_PA_BITS = ?
+
+        PGDIR_SHIFT = 
+     */
 	str_l	x4, idmap_ptrs_per_pgd, x5
+    /*
+        idmap_ptrs_per_pgd = ?
+     */
 #endif
 1:
 	ldr_l	x4, idmap_ptrs_per_pgd
+    /*
+        x4 = idmap_ptrs_per_pgd
+     */
+
 	mov	x5, x3				// __pa(__idmap_text_start)
+    /*
+        x5 = x3
+        x5에 mov하는 이유는?
+     */
+
 	adr_l	x6, __idmap_text_end		// __pa(__idmap_text_end)
+    /*
+        x6 = __idmap_text_end의 주소
+     */
 
 	map_memory x0, x1, x3, x6, x7, x3, x4, x10, x11, x12, x13, x14
+    /*
+        .macro map_memory,  tbl,    rtbl,   vstart, vend,   flags,  phys,   pgds,   istart, iend,   tmp,    count,  sv
+        map_memory          x0,     x1,     x3,     x6,     x7,     x3,     x4,     x10,    x11,    x12,    x13,    x14
+     */
 
 	/*
 	 * Map the kernel image (starting with PHYS_OFFSET).
 	 */
 	adrp	x0, init_pg_dir
+    /*
+        x0 = init_pg_dir
+     */
+
 	mov_q	x5, KIMAGE_VADDR + TEXT_OFFSET	// compile time __va(_text)
+    /*
+        x5 = KIMAGE_VADDR + TEXT_OFFSET
+     */
+
 	add	x5, x5, x23			// add KASLR displacement
+    /*
+        x5 = x5 + x23
+        해킹으로부터 보호하기 위해
+        KASLR displacement 조사
+     */
+
 	mov	x4, PTRS_PER_PGD
+    /*
+        x4 = PTRS_PER_PGD
+        PTRS_PER_PGD =
+            ./arch/arm64/include/asm/pgtable-hwdef.h
+            #define PTRS_PER_PGD		(1 << (MAX_USER_VA_BITS - PGDIR_SHIFT))
+                MAX_USER_VA_BITS =
+                    ./arch/arm64/include/asm/memory.h
+                    #ifdef CONFIG_ARM64_USER_VA_BITS_52
+                    #define MAX_USER_VA_BITS	52
+                    #else
+                    #define MAX_USER_VA_BITS	VA_BITS
+                        VA_BITS = ?
+                        ./arch/arm64/include/asm/memory.h
+                        #define VA_BITS			(CONFIG_ARM64_VA_BITS)
+                            CONFIG_ARM64_VA_BITS = ?
+                    #endif
+                PGDIR_SHIFT = 
+     */
+
 	adrp	x6, _end			// runtime __pa(_end)
+    /*
+        x6 = _end의 주소
+     */
+
 	adrp	x3, _text			// runtime __pa(_text)
+    /*
+        x3 = _text의 주소
+     */
+
 	sub	x6, x6, x3			// _end - _text
+    /*
+        x6 = x6 - x3
+        x6 = _text부터 _end까지 사이즈
+     */
+
 	add	x6, x6, x5			// runtime __va(_end)
+    /*
+        x6 = x6 + x5
+            x6 = _text부터 _end까지 사이즈
+            x5 = KIMAGE_VADDR + TEXT_OFFSET
+            va_end = va_text + (pa_end - pa_text) ?
+            pa_text부터 pa_end까지 주소가 연속 여부와 관계없는지 조사
+     */
 
 	map_memory x0, x1, x5, x6, x7, x3, x4, x10, x11, x12, x13, x14
+    /*
+        .macro map_memory,  tbl,    rtbl,   vstart, vend,   flags,  phys,   pgds,   istart, iend,   tmp,    count,  sv
+        map_memory          x0,     x1,     x5,     x6,     x7,     x3,     x4,     x10,    x11,    x12,    x13,    x14
+     */
 
 	/*
 	 * Since the page tables have been populated with non-cacheable
@@ -395,12 +638,59 @@ __create_page_tables:
 	 * tables again to remove any speculatively loaded cache lines.
 	 */
 	adrp	x0, idmap_pg_dir
+    /*
+        x0 = idmap_pg_dir의 주소
+        ARM DUI 0802A - 5-21
+            Address of 4KB page at a PC-relative offset.
+
+            Syntax
+                ADRP Xd, label
+                    Xd
+                        Is the 64-bit name of the general-purpose destination register, in the range 0 to 31.
+                    label
+                        Is the program label whose 4KB page address is to be calculated. An offset from the page address of this instruction, in the range ±4GB.
+     */
+
 	adrp	x1, init_pg_end
+    /*
+        x1 = init_pg_end의 주소
+     */
+
 	sub	x1, x1, x0
+    /*
+        x1 = x1 - x0
+        x1 = idmap_pg_dir부터 init_pg_end까지 사이즈
+     */
+
 	dmb	sy
+    /*
+        ARM DDI 0487E.a - C6-888
+            Data Memory Barrier is a memory barrier that ensures the ordering of observations of memory accesses,
+            see Data Memory Barrier (DMB) on page B2-125.
+
+            Assembler symbols
+                SY
+                    Full system is the required shareability domain, reads and writes are the required access types, both before and after the barrier instruction.
+                    This option is referred to as the full system barrier. Encoded as CRm = 0b1111.
+     */
+
 	bl	__inval_dcache_area
+    /*
+        __inval_dcache_area(kaddr, size)
+        x0 -> kaddr
+        x1 -> size
+     */
 
 	ret	x28
+    /*
+        ARM DUI 0802A - 5-119
+            Return from subroutine, branches unconditionally to an address in a register, with a hint that this is a subroutine return.
+
+            Syntax
+                RET {Xn}
+                    Xn
+                        Is the 64-bit name of the general-purpose register holding the address to be branched to, in the range 0 to 31. Defaults to X30 if absent.
+     */
 ENDPROC(__create_page_tables)
 	.ltorg
 
